@@ -1,0 +1,110 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>parasports_data</groupId>
+  <artifactId>parasports_data_import</artifactId>
+  <version>0.1.0</version>
+  
+  <name>Parasports Data Import Tool</name>
+  
+  <properties>
+    <slf4jVersion>1.7.10</slf4jVersion>
+    <apacheCommonsCompressVersion>1.9</apacheCommonsCompressVersion>
+    <wikidataToolkitVersion>0.8.0-SNAPSHOT</wikidataToolkitVersion>
+  </properties>
+  
+  <dependencies>
+    <dependency>
+      <groupId>org.wikidata.wdtk</groupId>
+      <artifactId>wdtk-datamodel</artifactId>
+      <version>${wikidataToolkitVersion}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.wikidata.wdtk</groupId>
+      <artifactId>wdtk-dumpfiles</artifactId>
+      <version>${wikidataToolkitVersion}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.wikidata.wdtk</groupId>
+      <artifactId>wdtk-rdf</artifactId>
+      <version>${wikidataToolkitVersion}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.wikidata.wdtk</groupId>
+      <artifactId>wdtk-wikibaseapi</artifactId>
+      <version>${wikidataToolkitVersion}</version>
+    </dependency>
+    <dependency>
+	  <groupId>org.apache.commons</groupId>
+	  <artifactId>commons-compress</artifactId>
+	  <version>${apacheCommonsCompressVersion}</version>
+    </dependency>
+    <dependency> 
+      <groupId>org.slf4j</groupId>
+	  <artifactId>slf4j-log4j12</artifactId>
+	  <version>${slf4jVersion}</version>
+	</dependency>
+
+    <!-- For reading the Excel sheets -->
+    <!-- https://mvnrepository.com/artifact/org.apache.poi/poi-ooxml -->
+    <dependency>
+      <groupId>org.apache.poi</groupId>
+      <artifactId>poi-ooxml</artifactId>
+      <version>3.16-beta1</version>
+    </dependency>
+
+    <!-- For the cache -->
+    <dependency>
+      <groupId>redis.clients</groupId>
+      <artifactId>jedis</artifactId>
+      <version>2.9.0</version>
+      <type>jar</type>
+      <scope>compile</scope>
+    </dependency>
+      <dependency>
+          <groupId>org.jetbrains</groupId>
+          <artifactId>annotations</artifactId>
+          <version>RELEASE</version>
+      </dependency>
+
+
+    <!-- Help with null detection -->
+    <!-- https://mvnrepository.com/artifact/com.intellij/annotations -->
+    <dependency>
+      <groupId>com.intellij</groupId>
+      <artifactId>annotations</artifactId>
+      <version>12.0</version>
+    </dependency>
+
+  </dependencies>
+
+  <build>
+    <sourceDirectory>src</sourceDirectory>
+    <plugins>
+      <plugin>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.1</version>
+        <configuration>
+          <source>1.8</source>
+          <target>1.8</target>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>2.4.3</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <artifactSet>
+              </artifactSet>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
