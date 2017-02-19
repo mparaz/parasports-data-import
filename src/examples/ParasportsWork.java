@@ -29,8 +29,6 @@ import org.wikidata.wdtk.datamodel.helpers.Datamodel;
 import org.wikidata.wdtk.datamodel.helpers.ItemDocumentBuilder;
 import org.wikidata.wdtk.datamodel.helpers.ReferenceBuilder;
 import org.wikidata.wdtk.datamodel.helpers.StatementBuilder;
-import org.wikidata.wdtk.datamodel.implementation.ItemIdValueImpl;
-import org.wikidata.wdtk.datamodel.implementation.PropertyIdValueImpl;
 import org.wikidata.wdtk.datamodel.interfaces.*;
 import org.wikidata.wdtk.util.WebResourceFetcherImpl;
 import org.wikidata.wdtk.wikibaseapi.*;
@@ -50,6 +48,21 @@ public class ParasportsWork {
 
     private static final String SITE_URI = "https://para-sports.es/entity/";
 
+    private static String customTrim(String s) {
+        final String trim1 = s.trim();
+
+        final StringBuilder sb = new StringBuilder();
+
+        for (char c : trim1.toCharArray()) {
+            if ((c == '\u200E') || (c == '\u200F')) {
+                // Ignore
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
     public static void main(String[] args) throws Exception {
         ApiConnection connection = new ApiConnection("https://para-sports.es/wiki/api.php");
 
@@ -65,10 +78,10 @@ public class ParasportsWork {
 
         final WikibaseDataFetcher wbdf = new WikibaseDataFetcher(connection, SITE_URI);
 
-        processSpreadsheet(connection, wbdf, wbde, args[0]);
+        processSpreadsheet(connection, wbdf, wbde, args[0], args[1]);
     }
 
-    private static void processSpreadsheet(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, String filename) throws Exception {
+    private static void processSpreadsheet(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, String filename, String type) throws Exception {
         // Input file here
         final InputStream inputStream = new FileInputStream(filename);
 
@@ -81,29 +94,35 @@ public class ParasportsWork {
 
 //        processItemCreation(connection, wbde, wb.getSheet("Missing item list items"));
 
-        // TODO Make the action selectable.
-
-        // create: items sheets.
-//        for (int i = 0; i < wb.getNumberOfSheets(); i++) {
-//            final String sheetName = wb.getSheetName(i);
-//            if (sheetName.toLowerCase().endsWith("items")) {
-//                System.out.println("Sheet: " + sheetName);
-//                processItemCreation(connection, wbde, wb.getSheetAt(i));
-//            }
-//        }
-
-        // statements sheets.
-        for (int i = 0; i < wb.getNumberOfSheets(); i++) {
-            final String sheetName = wb.getSheetName(i);
-            if (sheetName.toLowerCase().endsWith("statements")) {
-                System.out.println("Sheet: " + sheetName);
-                processStatementCreation(connection, wbdf, wbde, wb.getSheetAt(i), true);
+        if ("items".equals(type)) {
+            // create: items sheets.
+            for (int i = 0; i < wb.getNumberOfSheets(); i++) {
+                final String sheetName = wb.getSheetName(i);
+                if (sheetName.toLowerCase().endsWith("items")) {
+                    System.out.println("Sheet: " + sheetName);
+                    processItemCreation(connection, wbde, wb.getSheetAt(i));
+                }
             }
+        } else if ("statements".equals(type)) {
+            // statements sheets.
+            for (int i = 0; i < wb.getNumberOfSheets(); i++) {
+                final String sheetName = wb.getSheetName(i);
+                if (sheetName.toLowerCase().endsWith("statements")) {
+                    System.out.println("Sheet: " + sheetName);
+                    processStatementCreation(connection, wbdf, wbde, wb.getSheetAt(i), false);
+                }
+            }
+        } else {
+            System.err.println("type must be items or statements");
         }
 
         // Testing with one item on one sheet
 //        processStatementCreation(connection, wbdf, wbde, wb.getSheet("statements for Miguel"), false);
-//        cleanupStatementCreation(connection, wbdf, wbde, wb.getSheet("Country language statements"));
+
+        // Looking for Amy Winters
+//        processStatementCreation(connection, wbdf, wbde, wb.getSheet("person statements"), false);
+
+        //        cleanupStatementCreation(connection, wbdf, wbde, wb.getSheet("Country language statements"));
     }
 
     private static void processItemCreation(ApiConnection connection, WikibaseDataEditor wbde, XSSFSheet ws) throws Exception {
@@ -124,15 +143,15 @@ public class ParasportsWork {
                 break;
             }
 
-            final String item = row.getCell(0).toString().trim();
-            final String language = row.getCell(1).toString().trim();
+            final String item = customTrim(row.getCell(0).toString());
+            final String language = customTrim(row.getCell(1).toString());
 
             final XSSFCell labelCell = row.getCell(2);
             final String label;
             if (labelCell == null) {
                 label = "";
             } else {
-                label = labelCell.toString().trim();
+                label = customTrim(labelCell.toString());
             }
 
             final XSSFCell descriptionCell = row.getCell(3);
@@ -140,7 +159,7 @@ public class ParasportsWork {
             if (descriptionCell == null) {
                 description = "";
             } else {
-                description = descriptionCell.toString().trim();
+                description = customTrim(descriptionCell.toString());
             }
 
             // Aliases might be a non-existent cell
@@ -149,7 +168,7 @@ public class ParasportsWork {
             if (aliasesCell == null) {
                 aliases = "";
             } else {
-                aliases = aliasesCell.toString().trim();
+                aliases = customTrim(aliasesCell.toString());
             }
 
             // Duplicate check.
@@ -205,7 +224,7 @@ public class ParasportsWork {
         for (int i = 1; i < rowNum; i++) {
             final XSSFRow row = ws.getRow(i);
 
-            final String item = row.getCell(0).toString().trim();
+            final String item = customTrim(row.getCell(0).toString());
 
             // Retrieve this item
             final List<WbSearchEntitiesResult> wbSearchEntitiesResults =
@@ -219,8 +238,8 @@ public class ParasportsWork {
 
             final String itemId = wbSearchEntitiesResults.get(0).getEntityId();
 
-            final String statementType = row.getCell(2).toString().trim();
-            final String statementEntry = row.getCell(4).toString().trim();
+            final String statementType = customTrim(row.getCell(2).toString());
+            final String statementEntry = customTrim(row.getCell(4).toString());
 
             if ("item".equals(statementType)) {
 
@@ -255,24 +274,33 @@ public class ParasportsWork {
 
     private static final Map<String, String> findItemIdMap = new HashMap<>();
 
-    @org.jetbrains.annotations.Nullable
-    private static String findItemId(WbSearchEntitiesAction wbSearchEntitiesAction, String text) throws MediaWikiApiErrorException {
+    private static String findItemId(WbSearchEntitiesAction wbSearchEntitiesAction, WikibaseDataEditor wbde, String text, boolean ignoreP) throws MediaWikiApiErrorException, IOException {
         if (text.matches("^Q\\d+")) {
             // Qnnn item
             return text;
-        } else if (text.matches("^P\\d+")) {
-            // Pnnn property
+        } else if (text.matches("^P\\d+") && !ignoreP) {
+            // Pnnn property, but not ignored (for items and statements)
             return text;
         } else {
+            //
+            final String actualText;
+
+            // Remove double quotes
+            if (text.startsWith("\"")) {
+                actualText = text.replaceAll("^[\"]+|[\"]+$", "");
+            } else {
+                actualText = text;
+            }
+
             // Look up in the map first.
             // Separate the containsKey from the get because the API lookup could be null.
             String itemId;
             boolean hasItemId;
 
             synchronized (findItemIdMap) {
-                hasItemId = findItemIdMap.containsKey(text);
+                hasItemId = findItemIdMap.containsKey(actualText);
                 if (hasItemId) {
-                    itemId = findItemIdMap.get(text);
+                    itemId = findItemIdMap.get(actualText);
                     // TODO replace with a proper logging framework
 //                    System.err.println("Debug: cache hit, text=" + text + ", itemId=" + itemId);
                 } else {
@@ -293,9 +321,22 @@ public class ParasportsWork {
                     itemId = null;
                 } else {
                     // Search all the results for the exact match.
-                    for (final WbSearchEntitiesResult result: wbSearchEntitiesResults) {
-                        if (text.equalsIgnoreCase(result.getLabel())) {
+                    for (final WbSearchEntitiesResult result : wbSearchEntitiesResults) {
+                        if (text.equalsIgnoreCase(customTrim(result.getLabel()))) {
                             itemId = result.getEntityId();
+
+                            // Might need to repair
+                            if (!text.equalsIgnoreCase(result.getLabel())) {
+                                final String fix = customTrim(result.getLabel());
+
+                                final ItemDocumentBuilder itemDocumentBuilder = ItemDocumentBuilder
+                                        .forItemId(Datamodel.makeItemIdValue(result.getEntityId(), SITE_URI));
+                                itemDocumentBuilder.withLabel(fix, "en");
+                                wbde.editItemDocument(itemDocumentBuilder.build(), false,
+                                        "Trimmed string");
+
+                                System.err.println("Debug: trimmer: " + fix);
+                            }
                             break;
                         }
                     }
@@ -338,21 +379,35 @@ public class ParasportsWork {
         // Track the datatype per property from the API.
         final Map<String, String> dataTypeForProperty = new HashMap<>();
 
+        // Collect statements
+        final Map<String, List<Statement>> statementsForItem = new HashMap<>();
+
         // Skip over heading rows
         for (int i = 1; i < rowNum; i++) {
-            System.out.println("Row: " + (i + 1) + ", of: " + rowNum);
+            System.out.println("Reading row: " + (i + 1) + ", of: " + rowNum);
             final XSSFRow row = ws.getRow(i);
 
             // Need to watch for nulls off the edge of the row.
+            // The edge is hit when the row is null.
             if (row == null) {
                 break;
             }
 
-            final String item = row.getCell(0).toString().trim();
+            //  Skip the row when the first cell of the row is null.
+            final XSSFCell rowCell = row.getCell(0);
+            if (rowCell == null) {
+                continue;
+            }
 
-            final String statementItemId = findItemId(wbSearchEntitiesAction, item);
+            final String untrimmedItem = rowCell.toString();
+            final String item = customTrim(untrimmedItem);
+
+            // Item names will not have P.
+            final String statementItemId = findItemId(wbSearchEntitiesAction, wbde, item, true);
+
             if (statementItemId == null) {
                 System.err.println("Error: Item doesn't exist for statement creation: " + item);
+                System.err.println("Error: the trimming: " + customTrim(untrimmedItem));
                 continue;
             }
 
@@ -364,34 +419,52 @@ public class ParasportsWork {
             // Start at negative because it will be incremented at the top
             int columnOffset = -4;
 
+            // Track the number of rows.
+            int skippedSets = 0;
             while (true) {
                 columnOffset += 4;
 
                 // Stop when falling off the right edge.
                 final XSSFCell typeCell = row.getCell(1 + columnOffset);
                 if (typeCell == null) {
-                    break;
+                    skippedSets++;
+                    if (skippedSets == 2) {
+                        break;
+                    } else {
+                        // Previously there was a "skipping" log, but it was useless
+                        // because it was always skipping to reach the right end.
+                        continue;
+                    }
                 }
-                final String type = typeCell.toString().trim().toLowerCase();
+                final String type = customTrim(typeCell.toString()).toLowerCase();
 
                 final XSSFCell subtypeCell = row.getCell(2 + columnOffset);
                 if (subtypeCell == null) {
                     break;
                 }
-                final String subtype = subtypeCell.toString().trim().toLowerCase();
-
+                final String subtype = customTrim(subtypeCell.toString()).toLowerCase();
 
                 final XSSFCell propertyCell = row.getCell(3 + columnOffset);
                 if (propertyCell == null) {
+                    // End of row.
                     break;
                 }
-                final String property = propertyCell.toString().trim();
+                final String property = customTrim(propertyCell.toString());
+
+                // Ensure property is of form Pxxx
+                if (!property.matches("^P\\d+")) {
+                    System.err.println("Error: Property malformed: " + property + ", for item: " + item);
+                    // Can still try next column.
+                    continue;
+                }
 
                 final XSSFCell entryCell = row.getCell(4 + columnOffset);
                 if (entryCell == null) {
+                    // End of row.
                     break;
                 }
-                final String entry = entryCell.toString().trim();
+
+                final String entry = customTrim(entryCell.toString());
 
                 // First time we see this subtype, so check the property against the API.
                 // Check if we had already retrieved it.
@@ -444,7 +517,8 @@ public class ParasportsWork {
 
                 // Determine the value
                 if ("item".equals(subtype)) {
-                    final String itemId = findItemId(wbSearchEntitiesAction, entry);
+                    // Ignore P for items.
+                    final String itemId = findItemId(wbSearchEntitiesAction, wbde, entry, true);
                     if (itemId == null) {
                         System.err.println("Error: Unknown item: " + entry + ", for item: " + item + ", type: " + type);
                         continue;
@@ -473,7 +547,13 @@ public class ParasportsWork {
                     }
                 } else if ("url".equals(subtype)) {
                     // There is no URL type in Wikidata
-                    value = Datamodel.makeStringValue(entry);
+                    // We can't support multiple URLs so just detect them, for now.
+                    if (entry.contains(",")) {
+                        System.out.println("Warning: URL contains , : " + entry + ", taking only the first");
+                        value = Datamodel.makeStringValue(entry.split(",")[0]);
+                    } else {
+                        value = Datamodel.makeStringValue(entry);
+                    }
                 } else if ("globe coordinate".equals(subtype)) {
                     value = makeGlobalCoordinatesValue(entry);
                     if (value == null) {
@@ -507,29 +587,83 @@ public class ParasportsWork {
 
             // Display the statement built.
             if (statementBuilder == null) {
-                // Ignore this row
+                // Ignore this row if the statement was never built - like, no item.
                 continue;
             }
 
-            final Statement statement = statementBuilder.build();
+            statementsForItem.computeIfAbsent(item, (item2) -> new ArrayList<>()).add(statementBuilder.build());
+        }
 
-            // Save the statements built.
-            if (writeToServer) {
-                final ItemDocument newItemDocument;
-                try {
-                    final long startTime = System.currentTimeMillis();
-                    newItemDocument = wbde.updateStatements(Datamodel.makeItemIdValue(statementItemId, SITE_URI),
-                            Arrays.asList(statement),
-                            Collections.emptyList(),
-                            "update statement for " + item);
-                    final long elapsedTime = System.currentTimeMillis() - startTime;
+        for (final Map.Entry<String, List<Statement>> entry : statementsForItem.entrySet()) {
+            final String item = entry.getKey();
+            System.out.println("Processing item: " + item);
 
-                    System.out.println("item=" + item + ", id=" + newItemDocument.getItemId().getId()
-                            + ", statement=" + statement + ", elapsed=" + elapsedTime);
-                } catch (MediaWikiApiErrorException e) {
-                    e.printStackTrace();
-                    System.out.println("FAILED: item=" + item + ", statement=" + statement);
+            // Merge the statements with the same claim but different references.
+            final Map<Claim, List<Statement>> uniqueClaims = new HashMap<>();
 
+            for (final Statement statement : entry.getValue()) {
+                uniqueClaims.computeIfAbsent(statement.getClaim(), (claim) -> new ArrayList<>()).add(statement);
+            }
+
+            final Set<Statement> uniqueStatements = new HashSet<>();
+            for (final List<Statement> statements : uniqueClaims.values()) {
+
+                final Set<Reference> references = new HashSet<>();
+
+                StatementBuilder statementBuilder = null;
+
+                for (final Statement statement : statements) {
+                    if (statementBuilder == null) {
+                        // Copy the Statement into the ReferenceBuilder.
+                        // It only needs to be done once because the subsequent statements will have the same,
+                        // only the references will be different.
+                        statementBuilder = StatementBuilder.forSubjectAndProperty(statement.getClaim().getSubject(),
+                                statement.getClaim().getMainSnak().getPropertyId());
+
+                        // Because there's no direct way to copy:
+                        if (statement.getClaim().getMainSnak() instanceof SomeValueSnak) {
+                            statementBuilder.withSomeValue();
+                        } else if (statement.getClaim().getMainSnak() instanceof NoValueSnak) {
+                            statementBuilder.withNoValue();
+                        } else {
+                            statementBuilder.withValue(statement.getValue());
+                        }
+
+                        statementBuilder.withQualifiers(statement.getClaim().getQualifiers());
+                        statementBuilder.withId(statement.getStatementId());
+                        statementBuilder.withRank(statement.getRank());
+                    }
+
+                    references.addAll(statement.getReferences());
+                }
+
+                if (statementBuilder != null) {
+                    statementBuilder.withReferences(new ArrayList<>(references));
+                    uniqueStatements.add(statementBuilder.build());
+                }
+            }
+
+            for (final Statement statement : uniqueStatements) {
+                // Save the statements built.
+                if (writeToServer) {
+                    final ItemDocument newItemDocument;
+                    try {
+                        final long startTime = System.currentTimeMillis();
+                        newItemDocument = wbde.updateStatements((ItemIdValue) statement.getClaim().getSubject(),
+                                Arrays.asList(statement),
+                                Collections.emptyList(),
+                                "update statement for " + item);
+                        final long elapsedTime = System.currentTimeMillis() - startTime;
+
+                        System.out.println("update: item=" + item + ", id=" + newItemDocument.getItemId().getId()
+                                + ", statement=" + statement + ", elapsed=" + elapsedTime);
+                    } catch (MediaWikiApiErrorException e) {
+                        e.printStackTrace();
+                        System.out.println("FAILED: item=" + item + ", statement=" + statement);
+
+                    }
+                } else {
+                    System.out.println("debug: item=" + item + ", statement=" + statement);
                 }
             }
         }
@@ -555,8 +689,6 @@ public class ParasportsWork {
     private static Value makeTimeValue(String timeString) {
         // Support YYYY|YYYY MM|YYYY MM DD
         // Should be able to generalise this into many time formats with different precision.
-
-        final String monthsRegex = "(January|February|March|April|May|)";
 
         if (YEAR_PATTERN.matcher(timeString).matches()) {
             return Datamodel.makeTimeValue((int) Double.parseDouble(timeString), (byte) 1, (byte) 1, (byte) 0, (byte) 0,
