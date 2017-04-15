@@ -64,7 +64,7 @@ public class ParasportsWork {
     }
 
     public static void main(String[] args) throws Exception {
-        ApiConnection connection = new ApiConnection("https://para-sports.es/wiki/api.php");
+        ApiConnection connection = new ApiConnection("https://para-sports.es/w/api.php");
 
         // Always set your User-Agent to the name of your application:
         WebResourceFetcherImpl
@@ -94,27 +94,32 @@ public class ParasportsWork {
 
 //        processItemCreation(connection, wbde, wb.getSheet("Missing item list items"));
 
+
+//        oldMain(wbde);
+
+        int numberOfCellsProcessed = 0;
+
+        // Sheet names are no longer used.
         if ("items".equals(type)) {
             // create: items sheets.
             for (int i = 0; i < wb.getNumberOfSheets(); i++) {
                 final String sheetName = wb.getSheetName(i);
-                if (sheetName.toLowerCase().endsWith("items")) {
-                    System.out.println("Sheet: " + sheetName);
-                    processItemCreation(connection, wbde, wb.getSheetAt(i));
-                }
+                System.out.println("Sheet: " + sheetName);
+                numberOfCellsProcessed += processItemCreation(connection, wbde, wb.getSheetAt(i));
             }
         } else if ("statements".equals(type)) {
             // statements sheets.
             for (int i = 0; i < wb.getNumberOfSheets(); i++) {
                 final String sheetName = wb.getSheetName(i);
-                if (sheetName.toLowerCase().endsWith("statements")) {
-                    System.out.println("Sheet: " + sheetName);
-                    processStatementCreation(connection, wbdf, wbde, wb.getSheetAt(i), false);
-                }
+                System.out.println("Sheet: " + sheetName);
+                numberOfCellsProcessed += processStatementCreation(connection, wbdf, wbde, wb.getSheetAt(i), true);
             }
         } else {
             System.err.println("type must be items or statements");
         }
+
+        // Quick test
+
 
         // Testing with one item on one sheet
 //        processStatementCreation(connection, wbdf, wbde, wb.getSheet("statements for Miguel"), false);
@@ -123,9 +128,14 @@ public class ParasportsWork {
 //        processStatementCreation(connection, wbdf, wbde, wb.getSheet("person statements"), false);
 
         //        cleanupStatementCreation(connection, wbdf, wbde, wb.getSheet("Country language statements"));
+
+        System.out.println("numberOfCellsProcessed: " + numberOfCellsProcessed);
     }
 
-    private static void processItemCreation(ApiConnection connection, WikibaseDataEditor wbde, XSSFSheet ws) throws Exception {
+    private static int processItemCreation(ApiConnection connection, WikibaseDataEditor wbde, XSSFSheet ws) throws Exception {
+
+        int numberOfCellsProcessed = 0;
+
         final WbSearchEntitiesAction wbSearchEntitiesAction = new WbSearchEntitiesAction(connection, SITE_URI);
 
         // In item creation sheets, look up values for duplicate checking.
@@ -144,6 +154,12 @@ public class ParasportsWork {
             }
 
             final String item = customTrim(row.getCell(0).toString());
+
+            // Ignore blank items.
+            if ("".equals(item)) {
+                continue;
+            }
+
             final String language = customTrim(row.getCell(1).toString());
 
             final XSSFCell labelCell = row.getCell(2);
@@ -208,6 +224,10 @@ public class ParasportsWork {
                 e.printStackTrace();
             }
         }
+
+        numberOfCellsProcessed += 4;
+
+        return numberOfCellsProcessed;
     }
 
     private static void cleanupStatementCreation(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, XSSFSheet ws) throws Exception {
@@ -322,7 +342,8 @@ public class ParasportsWork {
                 } else {
                     // Search all the results for the exact match.
                     for (final WbSearchEntitiesResult result : wbSearchEntitiesResults) {
-                        if (text.equalsIgnoreCase(customTrim(result.getLabel()))) {
+                        final String customTrim = customTrim(result.getLabel());
+                        if (text.equalsIgnoreCase(customTrim)) {
                             itemId = result.getEntityId();
 
                             // Might need to repair
@@ -338,6 +359,10 @@ public class ParasportsWork {
                                 System.err.println("Debug: trimmer: " + fix);
                             }
                             break;
+                        } else {
+                            // Log the difference between what was searched for and what was received,
+                            // due to aliasing.
+                            System.err.println("Error: looking for: " + text + ", got: " + customTrim);
                         }
                     }
                 }
@@ -366,7 +391,9 @@ public class ParasportsWork {
         subtypeForDataType.put(DatatypeIdValue.DT_QUANTITY, "quantity");
     }
 
-    private static void processStatementCreation(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, XSSFSheet ws, boolean writeToServer) throws Exception {
+    private static int processStatementCreation(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, XSSFSheet ws, boolean writeToServer) throws Exception {
+
+        int numberOfCellsProcessed = 0;
 
         // First attempt: Country language statements. This is fixed columns.
         // Later, variable columns.
@@ -402,6 +429,11 @@ public class ParasportsWork {
             final String untrimmedItem = rowCell.toString();
             final String item = customTrim(untrimmedItem);
 
+            // Ignore blank items
+            if ("".equals(item)) {
+                continue;
+            }
+
             // Item names will not have P.
             final String statementItemId = findItemId(wbSearchEntitiesAction, wbde, item, true);
 
@@ -421,6 +453,10 @@ public class ParasportsWork {
 
             // Track the number of rows.
             int skippedSets = 0;
+
+            // Processed
+            numberOfCellsProcessed += 1;
+
             while (true) {
                 columnOffset += 4;
 
@@ -436,6 +472,8 @@ public class ParasportsWork {
                         continue;
                     }
                 }
+                numberOfCellsProcessed += 4;
+
                 final String type = customTrim(typeCell.toString()).toLowerCase();
 
                 final XSSFCell subtypeCell = row.getCell(2 + columnOffset);
@@ -518,17 +556,20 @@ public class ParasportsWork {
                 // Determine the value
                 if ("item".equals(subtype)) {
                     // Ignore P for items.
-                    final String itemId = findItemId(wbSearchEntitiesAction, wbde, entry, true);
-                    if (itemId == null) {
-                        System.err.println("Error: Unknown item: " + entry + ", for item: " + item + ", type: " + type);
-                        continue;
-                    } else {
-                        value = Datamodel.makeItemIdValue(itemId, SITE_URI);
+                    // Ignore blanks.
+                    if (!"".equalsIgnoreCase(entry)) {
+                        final String itemId = findItemId(wbSearchEntitiesAction, wbde, entry, true);
+                        if (itemId == null) {
+                            System.err.println("Error: Unknown item: " + entry + ", for item: " + item + ", type: " + type + ", property: " + property);
+                            continue;
+                        } else {
+                            value = Datamodel.makeItemIdValue(itemId, SITE_URI);
+                        }
                     }
                 } else if ("property".equals(subtype)) {
                     // The entry is the literal property, no checks
                     if (!entry.matches("^P\\d+")) {
-                        System.err.println("Error: Invalid property format: " + entry + ", for item: " + item + ", type: " + type);
+                        System.err.println("Error: Invalid property format: " + entry + ", for item: " + item + ", type: " + type + ", property: " + property);
                         continue;
                     } else {
                         value = Datamodel.makePropertyIdValue(entry, SITE_URI);
@@ -537,12 +578,14 @@ public class ParasportsWork {
                     value = Datamodel.makeStringValue(entry);
                 } else if ("quantity".equals(subtype)) {
                     // Don't make use of the range, so +- 0
-                    final BigDecimal entryAsBigDecimal = new BigDecimal(entry);
+                    // Remove any =
+                    final String entryNumber = entry.replaceAll("=", "");
+                    final BigDecimal entryAsBigDecimal = new BigDecimal(entryNumber);
                     value = Datamodel.makeQuantityValue(entryAsBigDecimal, entryAsBigDecimal, entryAsBigDecimal);
                 } else if ("point in time".equals(subtype)) {
                     value = makeTimeValue(entry);
                     if (value == null) {
-                        System.err.println("Error: Invalid point in time: " + entry + ", for item: " + item + ", type:" + type);
+                        System.err.println("Error: Invalid point in time: " + entry + ", for item: " + item + ", type:" + type + ", property: " + property);
                         continue;
                     }
                 } else if ("url".equals(subtype)) {
@@ -667,6 +710,8 @@ public class ParasportsWork {
                 }
             }
         }
+
+        return numberOfCellsProcessed;
     }
 
     private static final String[] MONTHS = {"January", "February", "March", "April", "May", "June",
@@ -753,98 +798,98 @@ public class ParasportsWork {
         // For this example, Dutch does not exist yet.
 
         final ItemDocument itemDocumentDutch = ItemDocumentBuilder.forItemId(noid)
-                .withLabel("Dutch", "en").build();
+                .withLabel("Miguel Paraz", "en").withLabel("Miguel Paraz es", "es").build();
         final ItemDocument newItemDocumentDutch = wbde.createItemDocument(itemDocumentDutch,
-                "Create: Dutch");
+                "Create: Miguel Paraz");
 
-        // Create Netherlands and assign Dutch as a statement
-        final ItemDocumentBuilder builder = ItemDocumentBuilder.forItemId(noid)
-                .withLabel("Netherlands", "en")
-                .withDescription("Country in Europe", "en");
+//        // Create Netherlands and assign Dutch as a statement
+//        final ItemDocumentBuilder builder = ItemDocumentBuilder.forItemId(noid)
+//                .withLabel("Netherlands", "en")
+//                .withDescription("Country in Europe", "en");
+//
+//        for (final String alias : "Pays-Bas|NED|OLA|NET|PBA|NLD|HOL".split(Pattern.quote("|"))) {
+//            builder.withAlias(alias, "en");
+//        }
+//
+//        // P124 is the actual value provided in the spreadsheet.
+//        builder.withStatement(
+//                StatementBuilder.forSubjectAndProperty(noid,
+//                        Datamodel.makePropertyIdValue("P124", SITE_URI))
+//                        .withValue(newItemDocumentDutch.getItemId()).build());
+//
+//        final ItemDocument itemDocumentNetherlands = builder.build();
+//
+//        final ItemDocument newItemDocumentNetherlands = wbde.createItemDocument(itemDocumentNetherlands,
+//                "Create: Netherlands");
+//
+//        // Create Netherlands national electric wheelchair hockey team
+//        final ItemDocumentBuilder builder2 = ItemDocumentBuilder.forItemId(noid)
+//                .withLabel("Netherlands national electric wheelchair hockey team", "en")
+//                .withDescription("national wheelchair hockey team from Europe", "en");
+//
+//
+//        // Add the statements
+//
+//        // Simple statements
+//        builder2.withStatement(
+//                StatementBuilder.forSubjectAndProperty(noid,
+//                        Datamodel.makePropertyIdValue("P85", SITE_URI))
+//                        .withValue(Datamodel.makeItemIdValue("Q147", SITE_URI)).build());
+//
+//        builder2.withStatement(
+//                StatementBuilder.forSubjectAndProperty(noid,
+//                        Datamodel.makePropertyIdValue("P85", SITE_URI))
+//                        .withValue(Datamodel.makeItemIdValue("Q110", SITE_URI)).build());
+//
+//        // This is a lookup for Netherlands
+//        builder2.withStatement(
+//                StatementBuilder.forSubjectAndProperty(noid,
+//                        Datamodel.makePropertyIdValue("P18", SITE_URI))
+//                        .withValue(newItemDocumentNetherlands.getItemId()).build());
+//
+//        builder2.withStatement(
+//                StatementBuilder.forSubjectAndProperty(noid,
+//                        Datamodel.makePropertyIdValue("P21", SITE_URI))
+//                        .withValue(Datamodel.makeItemIdValue("Q105", SITE_URI)).build());
+//
+//        // Statements with qualifiers
+//        // 1st place in 2012
+//        final StringValue documentUrl = Datamodel.makeStringValue("http://www.iwasf.com/iwasf/assets/File/Electric_Wheelchair_Hockey/World%20Ranking%20List_ICEWH2012.pdf");
+//        builder2.withStatement(
+//                StatementBuilder.forSubjectAndProperty(noid,
+//                        Datamodel.makePropertyIdValue("P84", SITE_URI))
+//                        .withValue(Datamodel.makeQuantityValue(1, 1, 1))
+//                        .withQualifierValue(Datamodel.makePropertyIdValue("P38", SITE_URI),
+//                                Datamodel.makeTimeValue(2012, (byte) 1, (byte) 1, (byte) 0, (byte) 0,
+//                                        (byte) 0, TimeValue.PREC_YEAR, 0, 1, 0,
+//                                        TimeValue.CM_GREGORIAN_PRO))
+//                        .withQualifierValue(Datamodel.makePropertyIdValue("P87", SITE_URI),
+//                                Datamodel.makeItemIdValue("Q106", SITE_URI))
+//                        .withReference(ReferenceBuilder.newInstance().withPropertyValue(Datamodel.makePropertyIdValue("P127", SITE_URI),
+//                                documentUrl).build()).build());
+//
+//        // 2nd place in 2012.
+//        // afterTolerance=1 means it can span a year.
+//        // Should be able to handle month+year, and date formats
+//        // 2017, 2017 January or 2017 January 3
+//        builder2.withStatement(
+//                StatementBuilder.forSubjectAndProperty(noid,
+//                        Datamodel.makePropertyIdValue("P84", SITE_URI))
+//                        .withValue(Datamodel.makeQuantityValue(2, 2, 2))
+//                        .withQualifierValue(Datamodel.makePropertyIdValue("P38", SITE_URI),
+//                                Datamodel.makeTimeValue(2011, (byte) 1, (byte) 1, (byte) 0, (byte) 0,
+//                                        (byte) 0, TimeValue.PREC_YEAR, 0, 1, 0,
+//                                        TimeValue.CM_GREGORIAN_PRO))
+//                        .withQualifierValue(Datamodel.makePropertyIdValue("P87", SITE_URI),
+//                                Datamodel.makeItemIdValue("Q106", SITE_URI))
+//                        .withReference(ReferenceBuilder.newInstance().withPropertyValue(Datamodel.makePropertyIdValue("P127", SITE_URI),
+//                                documentUrl).build()).build());
+//
+//        final ItemDocument itemDocumentNetherlandsTeam = builder2.build();
 
-        for (final String alias : "Pays-Bas|NED|OLA|NET|PBA|NLD|HOL".split(Pattern.quote("|"))) {
-            builder.withAlias(alias, "en");
-        }
-
-        // P124 is the actual value provided in the spreadsheet.
-        builder.withStatement(
-                StatementBuilder.forSubjectAndProperty(noid,
-                        Datamodel.makePropertyIdValue("P124", SITE_URI))
-                        .withValue(newItemDocumentDutch.getItemId()).build());
-
-        final ItemDocument itemDocumentNetherlands = builder.build();
-
-        final ItemDocument newItemDocumentNetherlands = wbde.createItemDocument(itemDocumentNetherlands,
-                "Create: Netherlands");
-
-        // Create Netherlands national electric wheelchair hockey team
-        final ItemDocumentBuilder builder2 = ItemDocumentBuilder.forItemId(noid)
-                .withLabel("Netherlands national electric wheelchair hockey team", "en")
-                .withDescription("national wheelchair hockey team from Europe", "en");
-
-
-        // Add the statements
-
-        // Simple statements
-        builder2.withStatement(
-                StatementBuilder.forSubjectAndProperty(noid,
-                        Datamodel.makePropertyIdValue("P85", SITE_URI))
-                        .withValue(Datamodel.makeItemIdValue("Q147", SITE_URI)).build());
-
-        builder2.withStatement(
-                StatementBuilder.forSubjectAndProperty(noid,
-                        Datamodel.makePropertyIdValue("P85", SITE_URI))
-                        .withValue(Datamodel.makeItemIdValue("Q110", SITE_URI)).build());
-
-        // This is a lookup for Netherlands
-        builder2.withStatement(
-                StatementBuilder.forSubjectAndProperty(noid,
-                        Datamodel.makePropertyIdValue("P18", SITE_URI))
-                        .withValue(newItemDocumentNetherlands.getItemId()).build());
-
-        builder2.withStatement(
-                StatementBuilder.forSubjectAndProperty(noid,
-                        Datamodel.makePropertyIdValue("P21", SITE_URI))
-                        .withValue(Datamodel.makeItemIdValue("Q105", SITE_URI)).build());
-
-        // Statements with qualifiers
-        // 1st place in 2012
-        final StringValue documentUrl = Datamodel.makeStringValue("http://www.iwasf.com/iwasf/assets/File/Electric_Wheelchair_Hockey/World%20Ranking%20List_ICEWH2012.pdf");
-        builder2.withStatement(
-                StatementBuilder.forSubjectAndProperty(noid,
-                        Datamodel.makePropertyIdValue("P84", SITE_URI))
-                        .withValue(Datamodel.makeQuantityValue(1, 1, 1))
-                        .withQualifierValue(Datamodel.makePropertyIdValue("P38", SITE_URI),
-                                Datamodel.makeTimeValue(2012, (byte) 1, (byte) 1, (byte) 0, (byte) 0,
-                                        (byte) 0, TimeValue.PREC_YEAR, 0, 1, 0,
-                                        TimeValue.CM_GREGORIAN_PRO))
-                        .withQualifierValue(Datamodel.makePropertyIdValue("P87", SITE_URI),
-                                Datamodel.makeItemIdValue("Q106", SITE_URI))
-                        .withReference(ReferenceBuilder.newInstance().withPropertyValue(Datamodel.makePropertyIdValue("P127", SITE_URI),
-                                documentUrl).build()).build());
-
-        // 2nd place in 2012.
-        // afterTolerance=1 means it can span a year.
-        // Should be able to handle month+year, and date formats
-        // 2017, 2017 January or 2017 January 3
-        builder2.withStatement(
-                StatementBuilder.forSubjectAndProperty(noid,
-                        Datamodel.makePropertyIdValue("P84", SITE_URI))
-                        .withValue(Datamodel.makeQuantityValue(2, 2, 2))
-                        .withQualifierValue(Datamodel.makePropertyIdValue("P38", SITE_URI),
-                                Datamodel.makeTimeValue(2011, (byte) 1, (byte) 1, (byte) 0, (byte) 0,
-                                        (byte) 0, TimeValue.PREC_YEAR, 0, 1, 0,
-                                        TimeValue.CM_GREGORIAN_PRO))
-                        .withQualifierValue(Datamodel.makePropertyIdValue("P87", SITE_URI),
-                                Datamodel.makeItemIdValue("Q106", SITE_URI))
-                        .withReference(ReferenceBuilder.newInstance().withPropertyValue(Datamodel.makePropertyIdValue("P127", SITE_URI),
-                                documentUrl).build()).build());
-
-        final ItemDocument itemDocumentNetherlandsTeam = builder2.build();
-
-        final ItemDocument newItemDocumentNetherlandsTeam = wbde.createItemDocument(itemDocumentNetherlandsTeam,
-                "Create: Netherlands Team");
-
-        System.out.println("All done: " + newItemDocumentNetherlandsTeam.getItemId().getId());
+//        final ItemDocument newItemDocumentNetherlandsTeam = wbde.createItemDocument(itemDocumentNetherlandsTeam,
+//                "Create: Netherlands Team");
+//
+//        System.out.println("All done: " + newItemDocumentNetherlandsTeam.getItemId().getId());
     }
 }
