@@ -39,6 +39,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -63,19 +66,24 @@ public class ParasportsWork {
         return sb.toString();
     }
 
-    public static void main(String[] args) throws Exception {
-        ApiConnection connection = new ApiConnection("https://para-sports.es/w/api.php");
+    // TODO These should be configurable and hidden.
 
+    private static final String WIKIBASE_USERNAME = "MParaz";
+    private static final String WIKIBASE_PASSWORD = "!para-sports!M1gs$";
+    private static final String WIKIBASE_URL = "https://para-sports.es/w/api.php";
+
+    public static void main(String[] args) throws Exception {
         // Always set your User-Agent to the name of your application:
         WebResourceFetcherImpl
                 .setUserAgent("Wikidata Toolkit ParasportsWork");
 
+        final ApiConnection connection = new ApiConnection(WIKIBASE_URL);
+
         // Optional login -- required for operations on real wikis:
 
-        connection.login("MParaz", "!para-sports!M1gs$");
+        connection.login(WIKIBASE_USERNAME, WIKIBASE_PASSWORD);
 
         final WikibaseDataEditor wbde = new WikibaseDataEditor(connection, SITE_URI);
-
         final WikibaseDataFetcher wbdf = new WikibaseDataFetcher(connection, SITE_URI);
 
         processSpreadsheet(connection, wbdf, wbde, args[0], args[1]);
@@ -85,7 +93,7 @@ public class ParasportsWork {
         // Input file here
         final InputStream inputStream = new FileInputStream(filename);
 
-        final XSSFWorkbook wb = new XSSFWorkbook(inputStream);
+        XSSFWorkbook wb = new XSSFWorkbook(inputStream);
 
         // So un-functional.
 //        for (int i = 0; i < wb.getNumberOfSheets(); i++) {
@@ -97,22 +105,39 @@ public class ParasportsWork {
 
 //        oldMain(wbde);
 
-        int numberOfCellsProcessed = 0;
-
         // Sheet names are no longer used.
         if ("items".equals(type)) {
             // create: items sheets.
             for (int i = 0; i < wb.getNumberOfSheets(); i++) {
                 final String sheetName = wb.getSheetName(i);
                 System.out.println("Sheet: " + sheetName);
-                numberOfCellsProcessed += processItemCreation(connection, wbde, wb.getSheetAt(i));
+                processItemCreation(connection, wbde, wb.getSheetAt(i));
             }
         } else if ("statements".equals(type)) {
             // statements sheets.
+
+            final List<Map<String, List<Statement>>> maps = new ArrayList<>();
+            final String[] sheetNames = new String[wb.getNumberOfSheets()];
+
             for (int i = 0; i < wb.getNumberOfSheets(); i++) {
                 final String sheetName = wb.getSheetName(i);
-                System.out.println("Sheet: " + sheetName);
-                numberOfCellsProcessed += processStatementCreation(connection, wbdf, wbde, wb.getSheetAt(i), true);
+                sheetNames[i] = sheetName;
+                System.out.println("Sheet loading: " + sheetName);
+                maps.add(loadStatements(connection, wbdf, wbde, wb.getSheetAt(i)));
+            }
+
+            // Help get workbook garbage-collected.
+            wb = null;
+
+            // Make the number of concurrent threads configurable.
+            final ExecutorService executorService = Executors.newFixedThreadPool(4);
+
+            int i = 0;
+            for (final Map<String, List<Statement>> map: maps) {
+                System.out.println("Sheet processing: " + sheetNames[i]);
+                i++;
+
+                writeStatements(executorService, map, true);
             }
         } else {
             System.err.println("type must be items or statements");
@@ -128,8 +153,6 @@ public class ParasportsWork {
 //        processStatementCreation(connection, wbdf, wbde, wb.getSheet("person statements"), false);
 
         //        cleanupStatementCreation(connection, wbdf, wbde, wb.getSheet("Country language statements"));
-
-        System.out.println("numberOfCellsProcessed: " + numberOfCellsProcessed);
     }
 
     private static int processItemCreation(ApiConnection connection, WikibaseDataEditor wbde, XSSFSheet ws) throws Exception {
@@ -391,10 +414,7 @@ public class ParasportsWork {
         subtypeForDataType.put(DatatypeIdValue.DT_QUANTITY, "quantity");
     }
 
-    private static int processStatementCreation(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, XSSFSheet ws, boolean writeToServer) throws Exception {
-
-        int numberOfCellsProcessed = 0;
-
+    private static Map<String, List<Statement>> loadStatements(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, XSSFSheet ws) throws MediaWikiApiErrorException, IOException {
         // First attempt: Country language statements. This is fixed columns.
         // Later, variable columns.
 
@@ -439,7 +459,6 @@ public class ParasportsWork {
 
             if (statementItemId == null) {
                 System.err.println("Error: Item doesn't exist for statement creation: " + item);
-                System.err.println("Error: the trimming: " + customTrim(untrimmedItem));
                 continue;
             }
 
@@ -453,9 +472,6 @@ public class ParasportsWork {
 
             // Track the number of rows.
             int skippedSets = 0;
-
-            // Processed
-            numberOfCellsProcessed += 1;
 
             while (true) {
                 columnOffset += 4;
@@ -472,7 +488,6 @@ public class ParasportsWork {
                         continue;
                     }
                 }
-                numberOfCellsProcessed += 4;
 
                 final String type = customTrim(typeCell.toString()).toLowerCase();
 
@@ -580,7 +595,17 @@ public class ParasportsWork {
                     // Don't make use of the range, so +- 0
                     // Remove any =
                     final String entryNumber = entry.replaceAll("=", "");
-                    final BigDecimal entryAsBigDecimal = new BigDecimal(entryNumber);
+
+                    final BigDecimal entryNumberBigDecimal;
+                    try {
+                        entryNumberBigDecimal = new BigDecimal(entryNumber);
+                    }  catch (NumberFormatException e) {
+                        System.err.println("Error: Invalid number: " + entryNumber);
+                        continue;
+                    }
+
+                    // Remove scientific notation which may be read from POI
+                    final BigDecimal entryAsBigDecimal = new BigDecimal(entryNumberBigDecimal.toPlainString());
                     value = Datamodel.makeQuantityValue(entryAsBigDecimal, entryAsBigDecimal, entryAsBigDecimal);
                 } else if ("point in time".equals(subtype)) {
                     value = makeTimeValue(entry);
@@ -610,6 +635,7 @@ public class ParasportsWork {
 
                 if (value == null) {
                     System.err.println("Error: No value found for item: " + item + ", subtype: " + subtype);
+                    continue;
                 }
 
                 // Determine what to do with the value.
@@ -637,81 +663,109 @@ public class ParasportsWork {
             statementsForItem.computeIfAbsent(item, (item2) -> new ArrayList<>()).add(statementBuilder.build());
         }
 
+        return statementsForItem;
+    }
+
+    private static void writeStatements(ExecutorService executorService,
+                                        Map<String, List<Statement>> statementsForItem, boolean writeToServer)
+            throws IOException, LoginFailedException {
+
         for (final Map.Entry<String, List<Statement>> entry : statementsForItem.entrySet()) {
+
             final String item = entry.getKey();
-            System.out.println("Processing item: " + item);
 
-            // Merge the statements with the same claim but different references.
-            final Map<Claim, List<Statement>> uniqueClaims = new HashMap<>();
+            // Execute on a per-item basis.
+            executorService.submit(() -> {
 
-            for (final Statement statement : entry.getValue()) {
-                uniqueClaims.computeIfAbsent(statement.getClaim(), (claim) -> new ArrayList<>()).add(statement);
-            }
+                try {
 
-            final Set<Statement> uniqueStatements = new HashSet<>();
-            for (final List<Statement> statements : uniqueClaims.values()) {
+                    // Make a fresh connection per thread.
+                    final ApiConnection connection = new ApiConnection(WIKIBASE_URL);
 
-                final Set<Reference> references = new HashSet<>();
+                    connection.login(WIKIBASE_USERNAME, WIKIBASE_PASSWORD);
 
-                StatementBuilder statementBuilder = null;
+                    final WikibaseDataEditor wbde = new WikibaseDataEditor(connection, SITE_URI);
 
-                for (final Statement statement : statements) {
-                    if (statementBuilder == null) {
-                        // Copy the Statement into the ReferenceBuilder.
-                        // It only needs to be done once because the subsequent statements will have the same,
-                        // only the references will be different.
-                        statementBuilder = StatementBuilder.forSubjectAndProperty(statement.getClaim().getSubject(),
-                                statement.getClaim().getMainSnak().getPropertyId());
+                    System.out.println("Processing item: " + item);
 
-                        // Because there's no direct way to copy:
-                        if (statement.getClaim().getMainSnak() instanceof SomeValueSnak) {
-                            statementBuilder.withSomeValue();
-                        } else if (statement.getClaim().getMainSnak() instanceof NoValueSnak) {
-                            statementBuilder.withNoValue();
-                        } else {
-                            statementBuilder.withValue(statement.getValue());
+                    // Merge the statements with the same claim but different references.
+                    final Map<Claim, List<Statement>> uniqueClaims = new HashMap<>();
+
+                    for (final Statement statement : entry.getValue()) {
+                        uniqueClaims.computeIfAbsent(statement.getClaim(), (claim) -> new ArrayList<>()).add(statement);
+                    }
+
+                    final Set<Statement> uniqueStatements = new HashSet<>();
+                    for (final List<Statement> statements : uniqueClaims.values()) {
+
+                        final Set<Reference> references = new HashSet<>();
+
+                        StatementBuilder statementBuilder = null;
+
+                        for (final Statement statement : statements) {
+                            if (statementBuilder == null) {
+                                // Copy the Statement into the ReferenceBuilder.
+                                // It only needs to be done once because the subsequent statements will have the same,
+                                // only the references will be different.
+                                statementBuilder = StatementBuilder.forSubjectAndProperty(statement.getClaim().getSubject(),
+                                        statement.getClaim().getMainSnak().getPropertyId());
+
+                                // Because there's no direct way to copy:
+                                if (statement.getClaim().getMainSnak() instanceof SomeValueSnak) {
+                                    statementBuilder.withSomeValue();
+                                } else if (statement.getClaim().getMainSnak() instanceof NoValueSnak) {
+                                    statementBuilder.withNoValue();
+                                } else {
+                                    statementBuilder.withValue(statement.getValue());
+                                }
+
+                                statementBuilder.withQualifiers(statement.getClaim().getQualifiers());
+                                statementBuilder.withId(statement.getStatementId());
+                                statementBuilder.withRank(statement.getRank());
+                            }
+
+                            references.addAll(statement.getReferences());
                         }
 
-                        statementBuilder.withQualifiers(statement.getClaim().getQualifiers());
-                        statementBuilder.withId(statement.getStatementId());
-                        statementBuilder.withRank(statement.getRank());
+                        if (statementBuilder != null) {
+                            statementBuilder.withReferences(new ArrayList<>(references));
+                            uniqueStatements.add(statementBuilder.build());
+                        }
                     }
 
-                    references.addAll(statement.getReferences());
-                }
+                    for (final Statement statement : uniqueStatements) {
+                        // Save the statements built.
+                        if (writeToServer) {
+                            final ItemDocument newItemDocument;
+                            try {
+                                final long startTime = System.currentTimeMillis();
+                                newItemDocument = wbde.updateStatements((ItemIdValue) statement.getClaim().getSubject(),
+                                        Arrays.asList(statement),
+                                        Collections.emptyList(),
+                                        "update statement for " + item);
+                                final long elapsedTime = System.currentTimeMillis() - startTime;
 
-                if (statementBuilder != null) {
-                    statementBuilder.withReferences(new ArrayList<>(references));
-                    uniqueStatements.add(statementBuilder.build());
-                }
-            }
+                                System.out.println("update: time=" + System.currentTimeMillis() + ", item=" + item + ", id=" + newItemDocument.getItemId().getId()
+                                        + ", statement=" + statement + ", elapsed=" + elapsedTime);
+                            } catch (MediaWikiApiErrorException e) {
+                                e.printStackTrace();
+                                System.out.println("FAILED: item=" + item + ", statement=" + statement);
 
-            for (final Statement statement : uniqueStatements) {
-                // Save the statements built.
-                if (writeToServer) {
-                    final ItemDocument newItemDocument;
-                    try {
-                        final long startTime = System.currentTimeMillis();
-                        newItemDocument = wbde.updateStatements((ItemIdValue) statement.getClaim().getSubject(),
-                                Arrays.asList(statement),
-                                Collections.emptyList(),
-                                "update statement for " + item);
-                        final long elapsedTime = System.currentTimeMillis() - startTime;
-
-                        System.out.println("update: item=" + item + ", id=" + newItemDocument.getItemId().getId()
-                                + ", statement=" + statement + ", elapsed=" + elapsedTime);
-                    } catch (MediaWikiApiErrorException e) {
-                        e.printStackTrace();
-                        System.out.println("FAILED: item=" + item + ", statement=" + statement);
-
+                            }
+                        } else {
+                            System.out.println("debug: item=" + item + ", statement=" + statement);
+                        }
                     }
-                } else {
-                    System.out.println("debug: item=" + item + ", statement=" + statement);
+                } catch (Exception e) {
+                    // Can't do anything or bubble up exception.
+                    System.err.println("Error: Inside Runnable" + e);
                 }
-            }
+            });
         }
 
-        return numberOfCellsProcessed;
+        // Allow the program to shut down.
+        // Runnables are no longer needed at the end of the loop.
+        executorService.shutdown();
     }
 
     private static final String[] MONTHS = {"January", "February", "March", "April", "May", "June",
