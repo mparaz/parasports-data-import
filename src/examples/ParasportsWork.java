@@ -34,12 +34,12 @@ import org.wikidata.wdtk.util.WebResourceFetcherImpl;
 import org.wikidata.wdtk.wikibaseapi.*;
 import org.wikidata.wdtk.wikibaseapi.apierrors.MediaWikiApiErrorException;
 
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -91,9 +91,7 @@ public class ParasportsWork {
 
     private static void processSpreadsheet(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, String filename, String type) throws Exception {
         // Input file here
-        final InputStream inputStream = new FileInputStream(filename);
-
-        XSSFWorkbook wb = new XSSFWorkbook(inputStream);
+        XSSFWorkbook wb = new XSSFWorkbook(new File(filename));
 
         // So un-functional.
 //        for (int i = 0; i < wb.getNumberOfSheets(); i++) {
@@ -139,6 +137,10 @@ public class ParasportsWork {
 
                 writeStatements(executorService, map, true);
             }
+
+            // Allow the program to shut down.
+            // Runnables are no longer needed at the end of the loop.
+            executorService.shutdown();
         } else {
             System.err.println("type must be items or statements");
         }
@@ -448,6 +450,7 @@ public class ParasportsWork {
 
             final String untrimmedItem = rowCell.toString();
             final String item = customTrim(untrimmedItem);
+            System.out.println("Read item: " + item);
 
             // Ignore blank items
             if ("".equals(item)) {
@@ -762,10 +765,6 @@ public class ParasportsWork {
                 }
             });
         }
-
-        // Allow the program to shut down.
-        // Runnables are no longer needed at the end of the loop.
-        executorService.shutdown();
     }
 
     private static final String[] MONTHS = {"January", "February", "March", "April", "May", "June",
