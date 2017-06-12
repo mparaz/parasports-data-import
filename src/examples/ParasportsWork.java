@@ -822,7 +822,9 @@ public class ParasportsWork {
         return null;
     }
 
-    private static final Pattern GCS_PATTERN = Pattern.compile("([0-9.]+)° N, ([0-9.])+° W");
+    // Geographical patterns can eithre support degrees N/degrees W or just the numbers.
+    private static final Pattern GCS_PATTERN = Pattern.compile("([\\-0-9.]+)° N, ([\\-0-9.])+° W");
+    private static final Pattern GCS_PATTERN2 = Pattern.compile("([\\-0-9.]+), ([\\-0-9.])");
 
     private static Value makeGlobalCoordinatesValue(String text) {
         // Supports decimal degrees. Example: 30.4168° N, 3.7038° W
@@ -830,12 +832,20 @@ public class ParasportsWork {
 
         final Matcher gcsMatcher = GCS_PATTERN.matcher(text);
 
+        // TODO There should be a better pattern for multiple matches of patterns.
         if (gcsMatcher.matches()) {
             final double latitude = Double.parseDouble(gcsMatcher.group(1));
             final double longitude = Double.parseDouble(gcsMatcher.group(2));
 
             return Datamodel.makeGlobeCoordinatesValue(latitude, longitude, 0.001, GlobeCoordinatesValue.GLOBE_EARTH);
         } else {
+            final Matcher gcsMatcher2 = GCS_PATTERN2.matcher(text);
+            if (gcsMatcher2.matches()) {
+                final double latitude = Double.parseDouble(gcsMatcher2.group(1));
+                final double longitude = Double.parseDouble(gcsMatcher2.group(2));
+
+                return Datamodel.makeGlobeCoordinatesValue(latitude, longitude, 0.001, GlobeCoordinatesValue.GLOBE_EARTH);
+            }
             return null;
         }
     }
