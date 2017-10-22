@@ -2,7 +2,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>parasports_data</groupId>
   <artifactId>parasports_data_import</artifactId>
-  <version>0.2.0</version>
+  <version>0.2.2</version>
   
   <name>Parasports Data Import Tool</name>
   

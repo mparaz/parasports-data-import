@@ -35,9 +35,7 @@ import org.wikidata.wdtk.wikibaseapi.*;
 import org.wikidata.wdtk.wikibaseapi.apierrors.MediaWikiApiErrorException;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
@@ -217,7 +215,10 @@ public class ParasportsWork {
                     wbSearchEntitiesAction.wbSearchEntities(label, language, true, "item",
                             1L, 0L);
 
-            if (!wbSearchEntitiesResults.isEmpty() && label.equals(wbSearchEntitiesResults.get(0).getLabel())) {
+            // Remove the check for aliases, such that matching aliases will also block adding.
+            // 2017/7/9 found that duplicate items have been added.
+            // if (!wbSearchEntitiesResults.isEmpty() && label.equals(wbSearchEntitiesResults.get(0).getLabel())) {
+            if (!wbSearchEntitiesResults.isEmpty()) {
                 // Duplicate! Skip.
                 System.err.println("Error: Already exists: " + language + "," + label);
                 continue;
@@ -404,16 +405,22 @@ public class ParasportsWork {
         }
     }
 
-    private static final Map<String, String> subtypeForDataType = new HashMap<>();
+    private static final Map<String, String> subtypesForDataType = new HashMap<>();
 
     static {
-        subtypeForDataType.put(DatatypeIdValue.DT_ITEM, "item");
-        subtypeForDataType.put(DatatypeIdValue.DT_PROPERTY, "property");
-        subtypeForDataType.put(DatatypeIdValue.DT_STRING, "string");
-        subtypeForDataType.put(DatatypeIdValue.DT_URL, "url");
-        subtypeForDataType.put(DatatypeIdValue.DT_TIME, "point in time");
-        subtypeForDataType.put(DatatypeIdValue.DT_GLOBE_COORDINATES, "globe coordinate");
-        subtypeForDataType.put(DatatypeIdValue.DT_QUANTITY, "quantity");
+        subtypesForDataType.put(DatatypeIdValue.DT_ITEM, "item");
+        subtypesForDataType.put(DatatypeIdValue.DT_PROPERTY, "property");
+        subtypesForDataType.put(DatatypeIdValue.DT_STRING, "string");
+        subtypesForDataType.put(DatatypeIdValue.DT_URL, "url");
+        subtypesForDataType.put(DatatypeIdValue.DT_TIME, "point in time");
+        subtypesForDataType.put(DatatypeIdValue.DT_GLOBE_COORDINATES, "globe coordinate");
+        subtypesForDataType.put(DatatypeIdValue.DT_QUANTITY, "quantity");
+    }
+
+    private static final Map<String, String> subtypeAliases = new HashMap<>();
+
+    static {
+        subtypeAliases.put("geographic coordinates", "globe coordinate");
     }
 
     private static Map<String, List<Statement>> loadStatements(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, XSSFSheet ws) throws MediaWikiApiErrorException, IOException {
@@ -498,7 +505,12 @@ public class ParasportsWork {
                 if (subtypeCell == null) {
                     break;
                 }
-                final String subtype = customTrim(subtypeCell.toString()).toLowerCase();
+
+                String subtype = customTrim(subtypeCell.toString()).toLowerCase();
+                String subtypeAlias = subtypeAliases.get(subtype);
+                if (subtypeAlias != null) {
+                    subtype = subtypeAlias;
+                }
 
                 final XSSFCell propertyCell = row.getCell(3 + columnOffset);
                 if (propertyCell == null) {
@@ -537,7 +549,7 @@ public class ParasportsWork {
                     dataTypeForProperty.put(property, datatypeIri);
                 }
 
-                final String expectedSubtype = subtypeForDataType.get(datatypeIri);
+                String expectedSubtype = subtypesForDataType.get(datatypeIri);
 
                 if (!subtype.equals(expectedSubtype)) {
                     System.err.println("Error: expected subtype: " + expectedSubtype
@@ -824,7 +836,7 @@ public class ParasportsWork {
 
     // Geographical patterns can eithre support degrees N/degrees W or just the numbers.
     private static final Pattern GCS_PATTERN = Pattern.compile("([\\-0-9.]+)° N, ([\\-0-9.])+° W");
-    private static final Pattern GCS_PATTERN2 = Pattern.compile("([\\-0-9.]+), ([\\-0-9.])");
+    private static final Pattern GCS_PATTERN2 = Pattern.compile("([\\-0-9.]+)\\s*,?\\s*([\\-0-9.]+)");
 
     private static Value makeGlobalCoordinatesValue(String text) {
         // Supports decimal degrees. Example: 30.4168° N, 3.7038° W

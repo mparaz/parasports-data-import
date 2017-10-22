@@ -1,3 +1,30 @@
+ParaSports Data Import
+======================
+
+This code provides a command line tool based on the Wikidata Toolkit Examples.
+It imports spreadsheets in XLSX format that contain either Items or
+Statements. Items must be created before Statements.
+The Properties in the Statements are created manually through the Wikidata
+web interface.
+
+Requirements
+------------
+* The `mparaz/Wikidata-Toolkit` fork which is not up-to-date
+with its upstream. It is separate because it incorporates an unmerged 
+pull request to support entity searching.
+* Java 1.8.
+
+
+Improvements
+------------
+* Make Wikibase username, password and URL externally configurable. 
+They are currently hard-coded.
+* Better understanding of the input XLSX files. It is currently a process of 
+trial and error to run the program, observe the output and make modifications.
+
+Original README from Wikidata Toolkit Examples:
+----------------------------------------------
+
 # Wikidata Toolkit Examples
 
 This is an example project that shows how to set up a Java project that
