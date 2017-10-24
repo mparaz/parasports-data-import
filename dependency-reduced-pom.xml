@@ -4,7 +4,7 @@
   <groupId>parasports_data</groupId>
   <artifactId>parasports_data_import</artifactId>
   <name>Parasports Data Import Tool</name>
-  <version>0.1.0</version>
+  <version>0.2.2</version>
   <build>
     <sourceDirectory>src</sourceDirectory>
     <plugins>

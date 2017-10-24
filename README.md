@@ -9,11 +9,15 @@ web interface.
 
 Requirements
 ------------
-* The `mparaz/Wikidata-Toolkit` fork which is not up-to-date
-with its upstream. It is separate because it incorporates an unmerged 
+* The [Wikidata Toolkit](https://github.com/mparaz/Wikidata-Toolkit) fork which is not up-to-date
+with the Wikimedia upstream. It is separate because it incorporates an unmerged 
 pull request to support entity searching.
 * Java 1.8.
 
+Command line examples
+--------------------
+* `java -Xmx4096m -classpath ~/parasports_data_import-0.2.2.jar examples.ParasportsWork items items-sheet.xlsx >> ./items-output.txt`
+* `java -Xmx4096m -classpath ~/parasports_data_import-0.2.2.jar examples.ParasportsWork statements statements-sheet.xlsx >> ./statements-output.txt`
 
 Improvements
 ------------
@@ -21,6 +25,9 @@ Improvements
 They are currently hard-coded.
 * Better understanding of the input XLSX files. It is currently a process of 
 trial and error to run the program, observe the output and make modifications.
+* Tests! Unit tests, acceptance tests. Right now, the test is ... running the code and looking at Wikibase.
+* Code health: style, static analysis.
+
 
 Original README from Wikidata Toolkit Examples:
 ----------------------------------------------
