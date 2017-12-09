@@ -36,7 +36,9 @@ import org.wikidata.wdtk.wikibaseapi.apierrors.MediaWikiApiErrorException;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
+import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -55,9 +57,7 @@ public class ParasportsWork {
         final StringBuilder sb = new StringBuilder();
 
         for (char c : trim1.toCharArray()) {
-            if ((c == '\u200E') || (c == '\u200F')) {
-                // Ignore
-            } else {
+            if ((c != '\u200E') && (c != '\u200F')) {
                 sb.append(c);
             }
         }
@@ -65,15 +65,18 @@ public class ParasportsWork {
     }
 
     // TODO These should be configurable and hidden.
+    // Easy solution: Java system properties.
 
-    private static final String WIKIBASE_USERNAME = "MParaz";
-    private static final String WIKIBASE_PASSWORD = "!para-sports!M1gs$";
-    private static final String WIKIBASE_URL = "https://para-sports.es/w/api.php";
+    private static final String WIKIBASE_USERNAME = System.getProperty("wikibase.username");
+    private static final String WIKIBASE_PASSWORD = System.getProperty("wikibase.password");
+    private static final String WIKIBASE_URL = System.getProperty("wikibase.url");
 
     public static void main(String[] args) throws Exception {
         // Always set your User-Agent to the name of your application:
         WebResourceFetcherImpl
                 .setUserAgent("Wikidata Toolkit ParasportsWork");
+
+        // TODO Use a command-line parsing library
 
         final ApiConnection connection = new ApiConnection(WIKIBASE_URL);
 
@@ -87,75 +90,59 @@ public class ParasportsWork {
         processSpreadsheet(connection, wbdf, wbde, args[0], args[1]);
     }
 
-    private static void processSpreadsheet(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, String filename, String type) throws Exception {
+    private static void processSpreadsheet(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde,
+                                           String url, String type) throws Exception {
         // Input file here
-        XSSFWorkbook wb = new XSSFWorkbook(new File(filename));
+        try (final InputStream inputStream = new URL(url).openStream()) {
 
-        // So un-functional.
-//        for (int i = 0; i < wb.getNumberOfSheets(); i++) {
-//            System.out.println(wb.getSheetName(i));
-//        }
+            XSSFWorkbook wb = new XSSFWorkbook(inputStream);
 
-//        processItemCreation(connection, wbde, wb.getSheet("Missing item list items"));
+            // Sheet names are no longer used.
+            if ("items".equals(type)) {
+                // create: items sheets.
+                for (int i = 0; i < wb.getNumberOfSheets(); i++) {
+                    final String sheetName = wb.getSheetName(i);
+                    System.out.println("Sheet: " + sheetName);
+                    processItemCreation(connection, wbde, wb.getSheetAt(i));
+                }
+            } else if ("statements".equals(type)) {
+                // statements sheets.
 
+                final List<Map<String, List<Statement>>> maps = new ArrayList<>();
+                final String[] sheetNames = new String[wb.getNumberOfSheets()];
 
-//        oldMain(wbde);
+                for (int i = 0; i < wb.getNumberOfSheets(); i++) {
+                    final String sheetName = wb.getSheetName(i);
+                    sheetNames[i] = sheetName;
+                    System.out.println("Sheet loading: " + sheetName);
+                    maps.add(loadStatements(connection, wbdf, wbde, wb.getSheetAt(i)));
+                }
 
-        // Sheet names are no longer used.
-        if ("items".equals(type)) {
-            // create: items sheets.
-            for (int i = 0; i < wb.getNumberOfSheets(); i++) {
-                final String sheetName = wb.getSheetName(i);
-                System.out.println("Sheet: " + sheetName);
-                processItemCreation(connection, wbde, wb.getSheetAt(i));
+                // Help get workbook garbage-collected.
+                wb = null;
+
+                // TODO Make the number of concurrent threads configurable.
+                final ExecutorService executorService = Executors.newFixedThreadPool(4);
+
+                int i = 0;
+                for (final Map<String, List<Statement>> map : maps) {
+                    System.out.println("Sheet processing: " + sheetNames[i]);
+                    i++;
+
+                    writeStatements(executorService, map, true);
+                }
+
+                // Allow the program to shut down.
+                // Runnables are no longer needed at the end of the loop.
+                executorService.shutdown();
+            } else {
+                System.err.println("type must be items or statements");
             }
-        } else if ("statements".equals(type)) {
-            // statements sheets.
-
-            final List<Map<String, List<Statement>>> maps = new ArrayList<>();
-            final String[] sheetNames = new String[wb.getNumberOfSheets()];
-
-            for (int i = 0; i < wb.getNumberOfSheets(); i++) {
-                final String sheetName = wb.getSheetName(i);
-                sheetNames[i] = sheetName;
-                System.out.println("Sheet loading: " + sheetName);
-                maps.add(loadStatements(connection, wbdf, wbde, wb.getSheetAt(i)));
-            }
-
-            // Help get workbook garbage-collected.
-            wb = null;
-
-            // Make the number of concurrent threads configurable.
-            final ExecutorService executorService = Executors.newFixedThreadPool(4);
-
-            int i = 0;
-            for (final Map<String, List<Statement>> map: maps) {
-                System.out.println("Sheet processing: " + sheetNames[i]);
-                i++;
-
-                writeStatements(executorService, map, true);
-            }
-
-            // Allow the program to shut down.
-            // Runnables are no longer needed at the end of the loop.
-            executorService.shutdown();
-        } else {
-            System.err.println("type must be items or statements");
         }
-
-        // Quick test
-
-
-        // Testing with one item on one sheet
-//        processStatementCreation(connection, wbdf, wbde, wb.getSheet("statements for Miguel"), false);
-
-        // Looking for Amy Winters
-//        processStatementCreation(connection, wbdf, wbde, wb.getSheet("person statements"), false);
-
-        //        cleanupStatementCreation(connection, wbdf, wbde, wb.getSheet("Country language statements"));
     }
 
-    private static int processItemCreation(ApiConnection connection, WikibaseDataEditor wbde, XSSFSheet ws) throws Exception {
+    private static int processItemCreation(ApiConnection connection, WikibaseDataEditor wbde, XSSFSheet ws)
+            throws Exception {
 
         int numberOfCellsProcessed = 0;
 
@@ -256,71 +243,10 @@ public class ParasportsWork {
         return numberOfCellsProcessed;
     }
 
-    private static void cleanupStatementCreation(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, XSSFSheet ws) throws Exception {
-
-        // First attempt: Country language statements. This is fixed columns.
-        // Later, variable columns.
-
-        final WbSearchEntitiesAction wbSearchEntitiesAction = new WbSearchEntitiesAction(connection, SITE_URI);
-
-        final ItemIdValue noid = ItemIdValue.NULL; // used when creating new items
-        final int rowNum = ws.getLastRowNum() + 1;
-
-        // Skip over heading rows
-        for (int i = 1; i < rowNum; i++) {
-            final XSSFRow row = ws.getRow(i);
-
-            final String item = customTrim(row.getCell(0).toString());
-
-            // Retrieve this item
-            final List<WbSearchEntitiesResult> wbSearchEntitiesResults =
-                    wbSearchEntitiesAction.wbSearchEntities(item, "en", true, "item",
-                            1L, 0L);
-
-            if (wbSearchEntitiesResults.isEmpty() || !item.equals(wbSearchEntitiesResults.get(0).getLabel())) {
-                System.err.println("Error: Doesn't exist for statement creation: item=" + item);
-                continue;
-            }
-
-            final String itemId = wbSearchEntitiesResults.get(0).getEntityId();
-
-            final String statementType = customTrim(row.getCell(2).toString());
-            final String statementEntry = customTrim(row.getCell(4).toString());
-
-            if ("item".equals(statementType)) {
-
-                final List<WbSearchEntitiesResult> wbSearchEntitiesResults2 =
-                        wbSearchEntitiesAction.wbSearchEntities(item, "en", true, "item",
-                                1L, 0L);
-
-                if (wbSearchEntitiesResults2.isEmpty() || !item.equals(wbSearchEntitiesResults2.get(0).getLabel())) {
-                    System.err.println("Error: Doesn't exist for statement creation: item=" + item + ", statementEntry=" +
-                            statementEntry);
-                    continue;
-                }
-
-                // Get the statements to delete.
-                // Converts the itemId to an ItemDocument which has Statements.
-                List<Statement> statements = StreamSupport.stream(
-                        Spliterators.spliteratorUnknownSize(((ItemDocument) wbdf.getEntityDocument(itemId)).getAllStatements(),
-                                Spliterator.ORDERED), false).collect(
-                        Collectors.toList());
-
-                final ItemDocument newItemDocument = wbde.updateStatements(Datamodel.makeItemIdValue(itemId, SITE_URI),
-                        Collections.emptyList(),
-                        statements,
-                        "delete statement for " + item);
-
-                System.out.println("Statement Deleted: " + newItemDocument.getItemId().getId());
-            } else {
-                System.err.println("Error: Unknown statement type: " + statementType);
-            }
-        }
-    }
-
     private static final Map<String, String> findItemIdMap = new HashMap<>();
 
-    private static String findItemId(WbSearchEntitiesAction wbSearchEntitiesAction, WikibaseDataEditor wbde, String text, boolean ignoreP) throws MediaWikiApiErrorException, IOException {
+    private static String findItemId(WbSearchEntitiesAction wbSearchEntitiesAction, WikibaseDataEditor wbde,
+                                     String text, boolean ignoreP) throws MediaWikiApiErrorException, IOException {
         if (text.matches("^Q\\d+")) {
             // Qnnn item
             return text;
@@ -398,7 +324,6 @@ public class ParasportsWork {
                 synchronized (findItemIdMap) {
                     findItemIdMap.put(text, itemId);
                 }
-
             }
 
             return itemId;
@@ -423,7 +348,11 @@ public class ParasportsWork {
         subtypeAliases.put("geographic coordinates", "globe coordinate");
     }
 
-    private static Map<String, List<Statement>> loadStatements(ApiConnection connection, WikibaseDataFetcher wbdf, WikibaseDataEditor wbde, XSSFSheet ws) throws MediaWikiApiErrorException, IOException {
+    private static Map<String, List<Statement>> loadStatements(ApiConnection connection,
+                                                               WikibaseDataFetcher wbdf,
+                                                               WikibaseDataEditor wbde,
+                                                               XSSFSheet ws)
+            throws MediaWikiApiErrorException, IOException {
         // First attempt: Country language statements. This is fixed columns.
         // Later, variable columns.
 
@@ -573,11 +502,13 @@ public class ParasportsWork {
                         continue;
                     }
 
-                    statementBuilder = StatementBuilder.forSubjectAndProperty(Datamodel.makeItemIdValue(statementItemId, SITE_URI),
+                    final ItemIdValue itemIdValue = Datamodel.makeItemIdValue(statementItemId, SITE_URI);
+                    statementBuilder = StatementBuilder.forSubjectAndProperty(itemIdValue,
                             Datamodel.makePropertyIdValue(property, SITE_URI));
                 } else {
                     if (statementBuilder == null) {
-                        System.err.println("Error: statement not set up but found another type: " + type + ", for item: " + item);
+                        System.err.println("Error: statement not set up but found another type: " + type +
+                                ", for item: " + item);
                     }
                 }
 
@@ -590,7 +521,8 @@ public class ParasportsWork {
                     if (!"".equalsIgnoreCase(entry)) {
                         final String itemId = findItemId(wbSearchEntitiesAction, wbde, entry, true);
                         if (itemId == null) {
-                            System.err.println("Error: Unknown item: " + entry + ", for item: " + item + ", type: " + type + ", property: " + property);
+                            System.err.println("Error: Unknown item: " + entry + ", for item: " + item +
+                                    ", type: " + type + ", property: " + property);
                             continue;
                         } else {
                             value = Datamodel.makeItemIdValue(itemId, SITE_URI);
@@ -599,7 +531,8 @@ public class ParasportsWork {
                 } else if ("property".equals(subtype)) {
                     // The entry is the literal property, no checks
                     if (!entry.matches("^P\\d+")) {
-                        System.err.println("Error: Invalid property format: " + entry + ", for item: " + item + ", type: " + type + ", property: " + property);
+                        System.err.println("Error: Invalid property format: " + entry + ", for item: "
+                                + item + ", type: " + type + ", property: " + property);
                         continue;
                     } else {
                         value = Datamodel.makePropertyIdValue(entry, SITE_URI);
@@ -625,7 +558,8 @@ public class ParasportsWork {
                 } else if ("point in time".equals(subtype)) {
                     value = makeTimeValue(entry);
                     if (value == null) {
-                        System.err.println("Error: Invalid point in time: " + entry + ", for item: " + item + ", type:" + type + ", property: " + property);
+                        System.err.println("Error: Invalid point in time: " + entry + ", for item: " + item +
+                                ", type:" + type + ", property: " + property);
                         continue;
                     }
                 } else if ("url".equals(subtype)) {
@@ -640,11 +574,13 @@ public class ParasportsWork {
                 } else if ("globe coordinate".equals(subtype)) {
                     value = makeGlobalCoordinatesValue(entry);
                     if (value == null) {
-                        System.err.println("Error: Invalid globe coordinate: " + entry + ", for item: " + item + ", type:" + type);
+                        System.err.println("Error: Invalid globe coordinate: " + entry + ", for item: " + item +
+                                ", type:" + type);
                         continue;
                     }
                 } else {
-                    System.err.println("Error: Unknown subtype: " + subtype + ", for item: " + item + ", type: " + type);
+                    System.err.println("Error: Unknown subtype: " + subtype + ", for item: " + item +
+                            ", type: " + type);
                     continue;
                 }
 
@@ -722,8 +658,9 @@ public class ParasportsWork {
                                 // Copy the Statement into the ReferenceBuilder.
                                 // It only needs to be done once because the subsequent statements will have the same,
                                 // only the references will be different.
-                                statementBuilder = StatementBuilder.forSubjectAndProperty(statement.getClaim().getSubject(),
-                                        statement.getClaim().getMainSnak().getPropertyId());
+                                final EntityIdValue subject = statement.getClaim().getSubject();
+                                final PropertyIdValue propertyId = statement.getClaim().getMainSnak().getPropertyId();
+                                statementBuilder = StatementBuilder.forSubjectAndProperty(subject, propertyId);
 
                                 // Because there's no direct way to copy:
                                 if (statement.getClaim().getMainSnak() instanceof SomeValueSnak) {
@@ -755,12 +692,13 @@ public class ParasportsWork {
                             try {
                                 final long startTime = System.currentTimeMillis();
                                 newItemDocument = wbde.updateStatements((ItemIdValue) statement.getClaim().getSubject(),
-                                        Arrays.asList(statement),
+                                        Collections.singletonList(statement),
                                         Collections.emptyList(),
                                         "update statement for " + item);
                                 final long elapsedTime = System.currentTimeMillis() - startTime;
 
-                                System.out.println("update: time=" + System.currentTimeMillis() + ", item=" + item + ", id=" + newItemDocument.getItemId().getId()
+                                System.out.println("update: time=" + System.currentTimeMillis() + ", item=" + item +
+                                        ", id=" + newItemDocument.getItemId().getId()
                                         + ", statement=" + statement + ", elapsed=" + elapsedTime);
                             } catch (MediaWikiApiErrorException e) {
                                 e.printStackTrace();
@@ -793,7 +731,8 @@ public class ParasportsWork {
 
     private static final Pattern YEAR_MONTH_PATTERN = Pattern.compile("^" + YEAR_REGEX + " " + MONTH_REGEX + "$");
 
-    private static final Pattern YEAR_MONTH_DAY_PATTERN = Pattern.compile("^" + YEAR_REGEX + " " + MONTH_REGEX + " " + DAY_REGEX + "$");
+    private static final Pattern YEAR_MONTH_DAY_PATTERN = Pattern.compile("^" + YEAR_REGEX + " " + MONTH_REGEX + " " +
+            DAY_REGEX + "$");
 
     @Nullable
     private static Value makeTimeValue(String timeString) {
@@ -849,122 +788,18 @@ public class ParasportsWork {
             final double latitude = Double.parseDouble(gcsMatcher.group(1));
             final double longitude = Double.parseDouble(gcsMatcher.group(2));
 
-            return Datamodel.makeGlobeCoordinatesValue(latitude, longitude, 0.001, GlobeCoordinatesValue.GLOBE_EARTH);
+            return Datamodel.makeGlobeCoordinatesValue(latitude, longitude, 0.001,
+                    GlobeCoordinatesValue.GLOBE_EARTH);
         } else {
             final Matcher gcsMatcher2 = GCS_PATTERN2.matcher(text);
             if (gcsMatcher2.matches()) {
                 final double latitude = Double.parseDouble(gcsMatcher2.group(1));
                 final double longitude = Double.parseDouble(gcsMatcher2.group(2));
 
-                return Datamodel.makeGlobeCoordinatesValue(latitude, longitude, 0.001, GlobeCoordinatesValue.GLOBE_EARTH);
+                return Datamodel.makeGlobeCoordinatesValue(latitude, longitude, 0.001,
+                        GlobeCoordinatesValue.GLOBE_EARTH);
             }
             return null;
         }
-    }
-
-    public static void oldMain(WikibaseDataEditor wbde) throws Exception {
-
-        // Editing
-        // Working with "example create items and add properties"
-
-        final ItemIdValue noid = ItemIdValue.NULL; // used when creating new items
-
-        // Create the Netherlands, but requires a lookup/create of Dutch
-        // For this example, Dutch does not exist yet.
-
-        final ItemDocument itemDocumentDutch = ItemDocumentBuilder.forItemId(noid)
-                .withLabel("Miguel Paraz", "en").withLabel("Miguel Paraz es", "es").build();
-        final ItemDocument newItemDocumentDutch = wbde.createItemDocument(itemDocumentDutch,
-                "Create: Miguel Paraz");
-
-//        // Create Netherlands and assign Dutch as a statement
-//        final ItemDocumentBuilder builder = ItemDocumentBuilder.forItemId(noid)
-//                .withLabel("Netherlands", "en")
-//                .withDescription("Country in Europe", "en");
-//
-//        for (final String alias : "Pays-Bas|NED|OLA|NET|PBA|NLD|HOL".split(Pattern.quote("|"))) {
-//            builder.withAlias(alias, "en");
-//        }
-//
-//        // P124 is the actual value provided in the spreadsheet.
-//        builder.withStatement(
-//                StatementBuilder.forSubjectAndProperty(noid,
-//                        Datamodel.makePropertyIdValue("P124", SITE_URI))
-//                        .withValue(newItemDocumentDutch.getItemId()).build());
-//
-//        final ItemDocument itemDocumentNetherlands = builder.build();
-//
-//        final ItemDocument newItemDocumentNetherlands = wbde.createItemDocument(itemDocumentNetherlands,
-//                "Create: Netherlands");
-//
-//        // Create Netherlands national electric wheelchair hockey team
-//        final ItemDocumentBuilder builder2 = ItemDocumentBuilder.forItemId(noid)
-//                .withLabel("Netherlands national electric wheelchair hockey team", "en")
-//                .withDescription("national wheelchair hockey team from Europe", "en");
-//
-//
-//        // Add the statements
-//
-//        // Simple statements
-//        builder2.withStatement(
-//                StatementBuilder.forSubjectAndProperty(noid,
-//                        Datamodel.makePropertyIdValue("P85", SITE_URI))
-//                        .withValue(Datamodel.makeItemIdValue("Q147", SITE_URI)).build());
-//
-//        builder2.withStatement(
-//                StatementBuilder.forSubjectAndProperty(noid,
-//                        Datamodel.makePropertyIdValue("P85", SITE_URI))
-//                        .withValue(Datamodel.makeItemIdValue("Q110", SITE_URI)).build());
-//
-//        // This is a lookup for Netherlands
-//        builder2.withStatement(
-//                StatementBuilder.forSubjectAndProperty(noid,
-//                        Datamodel.makePropertyIdValue("P18", SITE_URI))
-//                        .withValue(newItemDocumentNetherlands.getItemId()).build());
-//
-//        builder2.withStatement(
-//                StatementBuilder.forSubjectAndProperty(noid,
-//                        Datamodel.makePropertyIdValue("P21", SITE_URI))
-//                        .withValue(Datamodel.makeItemIdValue("Q105", SITE_URI)).build());
-//
-//        // Statements with qualifiers
-//        // 1st place in 2012
-//        final StringValue documentUrl = Datamodel.makeStringValue("http://www.iwasf.com/iwasf/assets/File/Electric_Wheelchair_Hockey/World%20Ranking%20List_ICEWH2012.pdf");
-//        builder2.withStatement(
-//                StatementBuilder.forSubjectAndProperty(noid,
-//                        Datamodel.makePropertyIdValue("P84", SITE_URI))
-//                        .withValue(Datamodel.makeQuantityValue(1, 1, 1))
-//                        .withQualifierValue(Datamodel.makePropertyIdValue("P38", SITE_URI),
-//                                Datamodel.makeTimeValue(2012, (byte) 1, (byte) 1, (byte) 0, (byte) 0,
-//                                        (byte) 0, TimeValue.PREC_YEAR, 0, 1, 0,
-//                                        TimeValue.CM_GREGORIAN_PRO))
-//                        .withQualifierValue(Datamodel.makePropertyIdValue("P87", SITE_URI),
-//                                Datamodel.makeItemIdValue("Q106", SITE_URI))
-//                        .withReference(ReferenceBuilder.newInstance().withPropertyValue(Datamodel.makePropertyIdValue("P127", SITE_URI),
-//                                documentUrl).build()).build());
-//
-//        // 2nd place in 2012.
-//        // afterTolerance=1 means it can span a year.
-//        // Should be able to handle month+year, and date formats
-//        // 2017, 2017 January or 2017 January 3
-//        builder2.withStatement(
-//                StatementBuilder.forSubjectAndProperty(noid,
-//                        Datamodel.makePropertyIdValue("P84", SITE_URI))
-//                        .withValue(Datamodel.makeQuantityValue(2, 2, 2))
-//                        .withQualifierValue(Datamodel.makePropertyIdValue("P38", SITE_URI),
-//                                Datamodel.makeTimeValue(2011, (byte) 1, (byte) 1, (byte) 0, (byte) 0,
-//                                        (byte) 0, TimeValue.PREC_YEAR, 0, 1, 0,
-//                                        TimeValue.CM_GREGORIAN_PRO))
-//                        .withQualifierValue(Datamodel.makePropertyIdValue("P87", SITE_URI),
-//                                Datamodel.makeItemIdValue("Q106", SITE_URI))
-//                        .withReference(ReferenceBuilder.newInstance().withPropertyValue(Datamodel.makePropertyIdValue("P127", SITE_URI),
-//                                documentUrl).build()).build());
-//
-//        final ItemDocument itemDocumentNetherlandsTeam = builder2.build();
-
-//        final ItemDocument newItemDocumentNetherlandsTeam = wbde.createItemDocument(itemDocumentNetherlandsTeam,
-//                "Create: Netherlands Team");
-//
-//        System.out.println("All done: " + newItemDocumentNetherlandsTeam.getItemId().getId());
     }
 }
